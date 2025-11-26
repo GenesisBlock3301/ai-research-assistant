@@ -52,11 +52,11 @@ def summarize_documents(state: State) -> State:
 
 
 def multiline_step_qa(
-    query: str,
-    db,
-    owner_id: int,
-    k: int = 5,
-    similarity_threshold: float = 0.5
+        query: str,
+        db,
+        owner_id: int,
+        k: int = 5,
+        similarity_threshold: float = 0.5
 ) -> State:
     state: State = {"query": query, "docs": [], "summary": ""}
 

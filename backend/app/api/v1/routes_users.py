@@ -39,7 +39,7 @@ def login(user: UserCreate, db: Session = Depends(get_db)):
 
     try:
         token_data = {"sub": str(db_user.id)}
-        token = jwt.encode(token_data, settings.SECRET_KEY, algorithm="HS256")
+        token = jwt.encode(token_data, settings.SECRET_KEY)
     except JWTError:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -38,7 +38,7 @@ const LoginForm = ({onSubmit, loading}: LoginFormProps) => {
             />
             <button
                 type="submit"
-                className="bg-green-600 text-white py-2 rounded hover:bg-green-700 text-black"
+                className="bg-green-600 py-2 rounded hover:bg-green-700 text-black"
                 disabled={loading}
             >
                 {loading ? "Loading..." : "Login"}

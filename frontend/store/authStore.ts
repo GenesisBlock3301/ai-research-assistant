@@ -28,7 +28,7 @@ export const useAuthStore = create<AuthState>()(
             token: null,
             loading: false,
             hydrated: false,
-            setHydrated: (value) => set({ hydrated: value }),
+            setHydrated: (value) => set({hydrated: value}),
             setUser: (user) => set({user}),
             login: async (email: string, password: string) => {
                 set({loading: true});

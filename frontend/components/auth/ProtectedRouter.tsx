@@ -23,7 +23,7 @@ const fetchCurrentUser = async (token: string) => {
 
 export default function ProtectedRouter({children}: { children: React.ReactNode }) {
     const router = useRouter();
-    const {user, token, logout, setUser} = useAuthStore();
+    const {token, logout, setUser} = useAuthStore();
     const [loading, setLoading] = useState<boolean>(true);
     useEffect(() => {
         const verifyToken = async () => {

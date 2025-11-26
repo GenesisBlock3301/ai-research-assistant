@@ -1,4 +1,5 @@
 from pydantic import BaseModel
 
 class DocumentRead(BaseModel):
-    pass
+    id: int
+    title: str

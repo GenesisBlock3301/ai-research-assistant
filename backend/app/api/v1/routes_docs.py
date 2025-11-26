@@ -1,12 +1,17 @@
+import logging
 import shutil
 import tempfile
+from typing import List
+
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
 from sqlalchemy.orm import Session
-from app.db import get_db, User
+from app.db import get_db, User, Document
 from app.services import IngestionService
 from app.schemas import DocumentRead
 from app.utils import get_current_user
 
+
+logger = logging.getLogger(__name__)
 
 document_router = APIRouter()
 
@@ -39,4 +44,27 @@ def upload_pdf(
         doc = ingestion_service.ingest_pdf(tmp_file_path, title or file.filename, owner_id)
         return doc
     except Exception as e:
+        logger.error(f"Error while uploading file: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@document_router.get("/list", response_model=List[DocumentRead], status_code=status.HTTP_200_OK)
+def document_lists(
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+):
+    try:
+        document_list = (
+            db.query(Document)
+            .filter(Document.owner_id == current_user.id)
+            .order_by(Document.created_at.desc())
+            .all()
+        )
+        return document_list
+
+    except Exception as e:
+        logger.error(f"Error while listing documents for user {current_user.id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while retrieving your documents."
+        )

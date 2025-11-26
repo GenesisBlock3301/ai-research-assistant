@@ -7,17 +7,12 @@ import re
 
 
 class IngestionService:
-    """
-    Ingests user-uploaded PDFs into database + vector store (pgvector),
-    splitting text into manageable chunks and embedding them.
-    """
 
     def __init__(self, db: Session):
         self.db = db
         self.vector_store = VectorStorage(db)
         self.embedding_service = EmbeddingService()
 
-    # --- Step 1: Text Cleaning & Chunking ---
     @staticmethod
     def clean_text(text: str) -> str:
         """Remove extra whitespace, line breaks, and non-printable characters."""
@@ -46,13 +41,7 @@ class IngestionService:
 
         return [c.strip() for c in chunks if len(c.strip()) > 0]
 
-    # --- Step 2: Ingest & Store Embeddings ---
     def ingest_pdf(self, file_path: str, title: str, owner_id: int):
-        """
-        Reads a PDF, extracts text, chunks it, embeds each chunk,
-        and saves all into the database linked to the user.
-        """
-        # Create document record
         doc = Document(title=title, owner_id=owner_id)
         self.db.add(doc)
         self.db.commit()

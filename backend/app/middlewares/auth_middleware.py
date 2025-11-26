@@ -4,8 +4,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from app.config import settings
 
-EXEMPT_PATHS = {"/api/v1/users/login", "/api/v1/users/register", "/docs", "/openapi.json", "/redoc",
-                "/api/v1/documents/upload", "/api/v1/chats/chat/multiline"}
+EXEMPT_PATHS = {"/api/v1/users/login", "/api/v1/users/register", "/docs", "/openapi.json", "/redoc"}
 
 
 class AuthMiddleware(BaseHTTPMiddleware):

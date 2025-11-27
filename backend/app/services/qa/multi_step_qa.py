@@ -14,11 +14,11 @@ class State(TypedDict):
 
 
 def retrieve_documents(
-    state: State,
-    vector_storage: VectorStorage,
-    owner_id: int,
-    k: int = 5,
-    similarity_threshold: float = 0.5
+        state: State,
+        vector_storage: VectorStorage,
+        owner_id: int,
+        k: int = 5,
+        similarity_threshold: float = 0.5
 ) -> State:
     retriever = PostgresRetriever(
         vector_storage=vector_storage,

@@ -23,18 +23,22 @@ export const useChatStore = create<ChatState>((set) => ({
 
         try {
             const token = useAuthStore.getState().token;
+            console.log("sendQuery", query);
             const res = await api.post(
                 "chats/chat/multiline",
-                {query},
+                {},
                 {
+                    params: {query: query},
                     headers: {
                         ...api.defaults.headers.common,
                         Authorization: `Bearer ${token}`
                     }
                 }
             );
+            console.log("res==", res);
             set({answer: res.data.summary || "No answer", loading: false});
         } catch (err: any) {
+            console.log("err==", err);
             set({
                 error: err.response?.data?.error || "Something went wrong",
                 loading: false,

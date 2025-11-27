@@ -23,6 +23,7 @@ class PostgresRetriever(BaseRetriever):
         """
         Filter chunks by metadata and cosine similarity.
         """
+
         def is_metadata_match(chunk):
             if not self.metadata_filter:
                 return True
@@ -49,29 +50,22 @@ class PostgresRetriever(BaseRetriever):
 
     def _get_relevant_documents(self, query: str, run_manager=None):
         query_emb = self.embedding_service.embed_texts([query])[0]
-        print(f"[DEBUG] Query embedding generated: {query_emb[:5]} ...")  # only first 5 numbers
+        print(f"[DEBUG] Query embedding generated: {query_emb[:5]} ...")
 
-        # 2️⃣ Search vector store
         chunks = self.vector_storage.search(
             query_emb, k=self.k, owner_id=self.owner_id
         )
         print(f"[DEBUG] Chunks retrieved from vector store: {len(chunks)}")
-
-        # 3️⃣ Filter by similarity + metadata
         chunks = self.filter_relevant_chunks(query_emb, chunks)
         print(f"[DEBUG] Chunks after filtering: {len(chunks)}")
-
-        # 4️⃣ Convert to LangChain Documents
-        return [
+        docs = [
             LCDocument(
                 page_content=chunk.chunk_text,
                 metadata={"doc_id": chunk.document_id, **(chunk.meta_info or {})}
             )
             for chunk in chunks
         ]
+        return docs
 
     def invoke(self, query: str):
-        """
-        For convenience: call this to retrieve documents
-        """
         return self._get_relevant_documents(query)

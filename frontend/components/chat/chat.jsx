@@ -6,21 +6,14 @@ import {useChatStore} from "@/store/chatStore";
 const Chat = () => {
     const [query, setQuery] = useState("");
 
-    // Select specific state slices for stability
-    const answer = useChatStore((state) => state.answer);
-    const loading = useChatStore((state) => state.loading);
-    const error = useChatStore((state) => state.error);
-    const sendQuery = useChatStore((state) => state.sendQuery);
-    const clear = useChatStore((state) => state.clear);
-
-    // Clear chat when input becomes empty
+    const {answer, loading, error, sendQuery, clear} = useChatStore();
     useEffect(() => {
         if (query === "") clear();
     }, [query, clear]);
 
     const handleSend = useCallback(() => {
         if (!query.trim() || loading) return;
-
+        console.log("Sending query", query.trim());
         sendQuery(query.trim());
         setQuery("");
     }, [query, loading, sendQuery]);

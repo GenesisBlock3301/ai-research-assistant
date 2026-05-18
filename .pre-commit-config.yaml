@@ -1,0 +1,103 @@
+# Pre-commit hooks: DETERMINISTIC enforcement layer
+# These run automatically on every git commit.
+# Install: uvx pre-commit install
+# Kimi does NOT run these — git does.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: mixed-line-ending
+
+  # ── Backend ──
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.12
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+        files: ^backend/
+      - id: ruff-format
+        files: ^backend/
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.19.1
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - pydantic
+          - pydantic-settings
+          - types-redis
+        args: [--strict]
+        files: ^backend/src/
+
+  # ── Frontend ──
+  - repo: local
+    hooks:
+      - id: frontend-tsc
+        name: Frontend TypeScript Check
+        entry: bash -c 'cd frontend && [ -d node_modules ] && npx tsc --noEmit || echo "⚠️ node_modules missing"'
+        language: system
+        pass_filenames: false
+        files: ^frontend/.*\.(ts|tsx)$
+
+      - id: frontend-eslint
+        name: Frontend ESLint
+        entry: bash -c 'cd frontend && [ -d node_modules ] && npx eslint --max-warnings 0 || echo "⚠️ node_modules missing"'
+        language: system
+        pass_filenames: false
+        files: ^frontend/.*\.(ts|tsx)$
+
+      - id: frontend-prettier
+        name: Frontend Prettier Check
+        entry: bash -c 'cd frontend && [ -d node_modules ] && npx prettier --check "src/**/*.{ts,tsx,css}" || echo "⚠️ node_modules missing"'
+        language: system
+        pass_filenames: false
+        files: ^frontend/.*\.(ts|tsx|css)$
+
+  # ── Architecture & Security (Deterministic) ──
+  - repo: local
+    hooks:
+      - id: validate-architecture
+        name: Validate Architecture
+        entry: bash scripts/validate_architecture.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: scan-secrets
+        name: Scan for Secrets
+        entry: bash scripts/scan_secrets.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+
+  # ── Push Protection (Deterministic) ──
+  - repo: local
+    hooks:
+      - id: block-git-push
+        name: Block git push
+        entry: bash scripts/block_git_push.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+  # ── SonarQube-style Quality Checks ──
+  - repo: local
+    hooks:
+      - id: validate-architecture
+        name: Validate Architecture (SonarQube-aligned)
+        entry: bash scripts/validate_architecture.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]

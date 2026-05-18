@@ -30,6 +30,32 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 BACKEND_SRC = PROJECT_ROOT / "backend" / "src"
 
+# ───────────────────────────────
+# Constants to avoid magic strings
+# ───────────────────────────────
+
+RULE_LAYER = "LAYER"
+RULE_ASYNC = "ASYNC"
+RULE_PRINT = "PRINT"
+RULE_TYPES = "TYPES"
+RULE_INLINE_IMPORT = "INLINE_IMPORT"
+RULE_SONAR = "SONAR"
+RULE_SECURITY = "SECURITY"
+RULE_API = "API"
+RULE_SECRETS = "SECRETS"
+
+PY_EXTENSION = ".py"
+ENV_FILE = ".env"
+GITIGNORE = ".gitignore"
+ROUTER_FILE = "router.py"
+FASTAPI = "fastapi"
+STARLETTE = "starlette"
+SQLALCHEMY = "sqlalchemy"
+FORBIDDEN_KEY = "forbidden"
+REASON_KEY = "reason"
+
+# ───────────────────────────────
+
 
 class Violation:
     def __init__(self, file: Path, line: int, rule: str, message: str) -> None:
@@ -54,9 +80,9 @@ class Validator:
 
     def report(self) -> None:
         if not self.violations:
-            logger.info("✅ All architectural validations passed.")
+            logger.info("All architectural validations passed.")
             return
-        logger.error("❌ Architectural violations found: %d", len(self.violations))
+        logger.error("Architectural violations found: %d", len(self.violations))
         for v in self.violations:
             logger.error("  %s", v)
 
@@ -65,22 +91,22 @@ class Validator:
 # Rule 1: Layer Enforcement
 # ───────────────────────────────
 
-FORBIDDEN_IMPORTS = {
-    "router.py": {
-        "forbidden": ["sqlalchemy", "qdrant_client", "redis"],
-        "reason": "Routers must not import DB/vector store directly",
+FORBIDDEN_IMPORTS: dict[str, dict[str, list[str] | str]] = {
+    ROUTER_FILE: {
+        FORBIDDEN_KEY: [SQLALCHEMY, "qdrant_client", "redis"],
+        REASON_KEY: "Routers must not import DB/vector store directly",
     },
     "service.py": {
-        "forbidden": ["fastapi", "starlette"],
-        "reason": "Services must be framework-agnostic",
+        FORBIDDEN_KEY: [FASTAPI, STARLETTE],
+        REASON_KEY: "Services must be framework-agnostic",
     },
     "repository.py": {
-        "forbidden": ["fastapi", "starlette"],
-        "reason": "Repositories must be framework-agnostic",
+        FORBIDDEN_KEY: [FASTAPI, STARLETTE],
+        REASON_KEY: "Repositories must be framework-agnostic",
     },
     "schemas.py": {
-        "forbidden": ["sqlalchemy", "fastapi"],
-        "reason": "Schemas must only import pydantic",
+        FORBIDDEN_KEY: [SQLALCHEMY, FASTAPI],
+        REASON_KEY: "Schemas must only import pydantic",
     },
 }
 
@@ -91,14 +117,16 @@ def check_layer_enforcement(file: Path, source: str, validator: Validator) -> No
         return
 
     rules = FORBIDDEN_IMPORTS[filename]
+    forbidden = rules[FORBIDDEN_KEY]
+    reason = rules[REASON_KEY]
     lines = source.splitlines()
     for i, line in enumerate(lines, start=1):
         stripped = line.strip()
         if not stripped.startswith(("import ", "from ")):
             continue
-        for forbidden in rules["forbidden"]:
-            if forbidden in stripped:
-                validator.add(file, i, "LAYER", rules["reason"])
+        for item in forbidden:
+            if item in stripped:
+                validator.add(file, i, RULE_LAYER, reason)
 
 
 # ───────────────────────────────
@@ -115,7 +143,7 @@ SYNC_FORBIDDEN_IN_ASYNC = [
 
 
 def check_async_discipline(file: Path, source: str, validator: Validator) -> None:
-    if not file.name.endswith(".py"):
+    if not file.name.endswith(PY_EXTENSION):
         return
 
     lines = source.splitlines()
@@ -132,28 +160,64 @@ def check_async_discipline(file: Path, source: str, validator: Validator) -> Non
 
         for pattern, reason in SYNC_FORBIDDEN_IN_ASYNC:
             if re.search(pattern, line):
-                validator.add(file, i, "ASYNC", reason)
+                validator.add(file, i, RULE_ASYNC, reason)
 
 
 # ───────────────────────────────
-# Rule 3: No Print Statements
+# Rule 3: No Print Statements (AST-based to avoid regex false positives)
 # ───────────────────────────────
+
 
 def check_no_print(file: Path, source: str, validator: Validator) -> None:
-    if not file.name.endswith(".py"):
+    if not file.name.endswith(PY_EXTENSION):
         return
-    lines = source.splitlines()
-    for i, line in enumerate(lines, start=1):
-        if re.search(r"\bprint\s*\(", line) and "# noqa" not in line:
-            validator.add(file, i, "PRINT", "Use logger instead of print()")
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name) and node.func.id == "print":
+            validator.add(file, node.lineno, RULE_PRINT, "Use logger instead of print()")
 
 
 # ───────────────────────────────
 # Rule 4: Type Hints Required
 # ───────────────────────────────
 
+
+def _func_type_msg(name: str, detail: str) -> str:
+    return f"Function '{name}' {detail}"
+
+
+def _check_function_type_hints(
+    file: Path, node: ast.FunctionDef | ast.AsyncFunctionDef, validator: Validator
+) -> None:
+    if node.name.startswith("_"):
+        return
+    if node.returns is None:
+        validator.add(
+            file,
+            node.lineno,
+            RULE_TYPES,
+            _func_type_msg(node.name, "missing return type annotation"),
+        )
+    for arg in node.args.args:
+        if arg.arg in ("self", "cls"):
+            continue
+        if arg.annotation is None:
+            validator.add(
+                file,
+                node.lineno,
+                RULE_TYPES,
+                _func_type_msg(node.name, f"param '{arg.arg}' missing type hint"),
+            )
+
+
 def check_type_hints(file: Path, source: str, validator: Validator) -> None:
-    if not file.name.endswith(".py"):
+    if not file.name.endswith(PY_EXTENSION):
         return
 
     try:
@@ -163,33 +227,48 @@ def check_type_hints(file: Path, source: str, validator: Validator) -> None:
 
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            if node.name.startswith("_"):
-                continue  # Skip private
-            if node.returns is None:
-                validator.add(
-                    file, node.lineno, "TYPES",
-                    f"Function '{node.name}' missing return type annotation"
-                )
-            for arg in node.args.args:
-                if arg.arg == "self" or arg.arg == "cls":
-                    continue
-                if arg.annotation is None:
-                    validator.add(
-                        file, node.lineno, "TYPES",
-                        f"Function '{node.name}' param '{arg.arg}' missing type hint"
-                    )
+            _check_function_type_hints(file, node, validator)
 
 
 # ───────────────────────────────
 # Rule 5: No Inline Imports
 # ───────────────────────────────
 
-# Allow inline imports ONLY in Celery task files where async_to_sync bridging is needed
 INLINE_IMPORT_ALLOWLIST = {"celery_app.py", "tasks.py"}
 
 
+def _is_type_checking_import(node: ast.AST) -> bool:
+    if not isinstance(node, ast.ImportFrom):
+        return False
+    if node.module != "typing":
+        return False
+    return any(alias.name == "TYPE_CHECKING" for alias in node.names)
+
+
+def _check_inline_in_function(
+    file: Path,
+    func: ast.FunctionDef | ast.AsyncFunctionDef,
+    validator: Validator,
+) -> None:
+    for child in ast.walk(func):
+        if child is func:
+            continue
+        if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        if not isinstance(child, ast.Import | ast.ImportFrom):
+            continue
+        if _is_type_checking_import(child):
+            continue
+        validator.add(
+            file,
+            child.lineno,
+            RULE_INLINE_IMPORT,
+            f"Inline import inside function '{func.name}' — move all imports to module top level",
+        )
+
+
 def check_no_inline_imports(file: Path, source: str, validator: Validator) -> None:
-    if not file.name.endswith(".py"):
+    if not file.name.endswith(PY_EXTENSION):
         return
     if file.name in INLINE_IMPORT_ALLOWLIST:
         return
@@ -201,20 +280,7 @@ def check_no_inline_imports(file: Path, source: str, validator: Validator) -> No
 
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            for child in ast.walk(node):
-                # Don't recurse into nested functions — we'll catch them on their own walk
-                if child is not node and isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
-                    continue
-                if isinstance(child, ast.Import | ast.ImportFrom):
-                    # Allow TYPE_CHECKING blocks (they shouldn't be in functions anyway)
-                    if isinstance(child, ast.ImportFrom) and child.module == "typing" and any(
-                        alias.name == "TYPE_CHECKING" for alias in child.names
-                    ):
-                        continue
-                    validator.add(
-                        file, child.lineno, "INLINE_IMPORT",
-                        f"Inline import inside function '{node.name}' — move all imports to module top level"
-                    )
+            _check_inline_in_function(file, node, validator)
 
 
 # ───────────────────────────────
@@ -224,19 +290,39 @@ def check_no_inline_imports(file: Path, source: str, validator: Validator) -> No
 MAX_COGNITIVE_COMPLEXITY = 15
 MAX_FUNCTION_PARAMS = 7
 MAX_NESTING_DEPTH = 4
-MAGIC_STRING_ALLOWLIST = {"", " ", ".", ",", "-", "_", ":", ";", "?", "!",
-                          "ok", "error", "true", "false", "null", "none",
-                          "get", "post", "put", "delete", "patch",
-                          "application/json", "application/pdf", "text/plain"}
+MAGIC_STRING_ALLOWLIST = {
+    "",
+    " ",
+    ".",
+    ",",
+    "-",
+    "_",
+    ":",
+    ";",
+    "?",
+    "!",
+    "ok",
+    "error",
+    "true",
+    "false",
+    "null",
+    "none",
+    "get",
+    "post",
+    "put",
+    "delete",
+    "patch",
+    "application/json",
+    "application/pdf",
+    "text/plain",
+}
 
 
 def _count_bool_ops(node: ast.AST) -> int:
     """Count boolean operations for complexity (and/or add +1 per operand beyond first)."""
-    count = 0
-    for child in ast.walk(node):
-        if isinstance(child, ast.BoolOp):
-            count += len(child.values) - 1
-    return count
+    return sum(
+        len(child.values) - 1 for child in ast.walk(node) if isinstance(child, ast.BoolOp)
+    )
 
 
 def _calc_complexity(node: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
@@ -245,9 +331,7 @@ def _calc_complexity(node: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
     for child in ast.walk(node):
         if child is node:
             continue
-        if isinstance(child, (ast.If, ast.While, ast.For, ast.ExceptHandler)):
-            complexity += 1
-        elif isinstance(child, ast.With):
+        if isinstance(child, (ast.If, ast.While, ast.For, ast.ExceptHandler, ast.With)):
             complexity += 1
         elif isinstance(child, ast.comprehension):
             complexity += 1
@@ -255,8 +339,113 @@ def _calc_complexity(node: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
     return complexity
 
 
+# ── 6a: Complexity & parameter count ──
+
+
+def _check_complexity_and_params(
+    file: Path, node: ast.FunctionDef | ast.AsyncFunctionDef, validator: Validator
+) -> None:
+    param_count = (
+        len(node.args.args)
+        + len(node.args.posonlyargs)
+        + len(node.args.kwonlyargs)
+    )
+    if node.args.vararg:
+        param_count += 1
+    if node.args.kwarg:
+        param_count += 1
+    if param_count > MAX_FUNCTION_PARAMS:
+        msg = _func_type_msg(
+            node.name,
+            f"has {param_count} parameters (max {MAX_FUNCTION_PARAMS}) — group into a model",
+        )
+        validator.add(file, node.lineno, RULE_SONAR, msg)
+
+    complexity = _calc_complexity(node)
+    if complexity > MAX_COGNITIVE_COMPLEXITY:
+        msg = _func_type_msg(
+            node.name,
+            f"cognitive complexity = {complexity} (max {MAX_COGNITIVE_COMPLEXITY}) — extract helpers",
+        )
+        validator.add(file, node.lineno, RULE_SONAR, msg)
+
+
+# ── 6b: Empty except blocks ──
+
+
+def _check_empty_except(file: Path, handler: ast.ExceptHandler, validator: Validator) -> None:
+    if not handler.body:
+        validator.add(
+            file,
+            handler.lineno,
+            RULE_SONAR,
+            "Empty except block — log the exception or remove the try/except",
+        )
+        return
+    if len(handler.body) == 1 and isinstance(handler.body[0], ast.Pass):
+        validator.add(
+            file,
+            handler.lineno,
+            RULE_SONAR,
+            "Empty except block — log the exception or remove the try/except",
+        )
+
+
+# ── 6c: Magic string literals ──
+
+
+def _check_magic_strings(file: Path, tree: ast.AST, validator: Validator) -> None:
+    string_counts: dict[str, list[int]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+            continue
+        s = node.value
+        if len(s) < 3 or s.lower() in MAGIC_STRING_ALLOWLIST:
+            continue
+        string_counts.setdefault(s, []).append(node.lineno)
+
+    for s, lines in string_counts.items():
+        if len(lines) >= 3:
+            validator.add(
+                file,
+                lines[0],
+                RULE_SONAR,
+                f"Magic string '{s[:30]}...' duplicated {len(lines)} times — extract to constant",
+            )
+
+
+# ── 6d: Nested control flow depth ──
+
+
+def _check_nesting(
+    file: Path,
+    node: ast.AST,
+    depth: int,
+    reported: set[int],
+    validator: Validator,
+) -> None:
+    if depth > MAX_NESTING_DEPTH:
+        line = getattr(node, "lineno", 0)
+        if line > 0 and line not in reported:
+            reported.add(line)
+            validator.add(
+                file,
+                line,
+                RULE_SONAR,
+                f"Control flow nesting depth = {depth} (max {MAX_NESTING_DEPTH}) — extract helper or use early returns",
+            )
+
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.If, ast.For, ast.While, ast.With, ast.Try)):
+            _check_nesting(file, child, depth + 1, reported, validator)
+        elif isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+            _check_nesting(file, child, 0, reported, validator)
+        else:
+            _check_nesting(file, child, depth, reported, validator)
+
+
 def check_sonar_quality(file: Path, source: str, validator: Validator) -> None:
-    if not file.name.endswith(".py"):
+    if not file.name.endswith(PY_EXTENSION):
         return
 
     try:
@@ -264,77 +453,25 @@ def check_sonar_quality(file: Path, source: str, validator: Validator) -> None:
     except SyntaxError:
         return
 
-    # 1. Cognitive complexity & parameter count
+    # Complexity & params
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            # Parameter count
-            param_count = len(node.args.args) + len(node.args.posonlyargs) + len(node.args.kwonlyargs)
-            if node.args.vararg:
-                param_count += 1
-            if node.args.kwarg:
-                param_count += 1
-            if param_count > MAX_FUNCTION_PARAMS:
-                validator.add(
-                    file, node.lineno, "SONAR",
-                    f"Function '{node.name}' has {param_count} parameters (max {MAX_FUNCTION_PARAMS}) — group into a model"
-                )
+            _check_complexity_and_params(file, node, validator)
 
-            # Cognitive complexity
-            complexity = _calc_complexity(node)
-            if complexity > MAX_COGNITIVE_COMPLEXITY:
-                validator.add(
-                    file, node.lineno, "SONAR",
-                    f"Function '{node.name}' cognitive complexity = {complexity} (max {MAX_COGNITIVE_COMPLEXITY}) — extract helpers"
-                )
-
-    # 2. Empty except blocks
+    # Empty except blocks
     for node in ast.walk(tree):
-        if isinstance(node, ast.Try):
-            for handler in node.handlers:
-                if not handler.body or (
-                    len(handler.body) == 1 and isinstance(handler.body[0], ast.Pass)
-                ):
-                    validator.add(
-                        file, handler.lineno, "SONAR",
-                        "Empty except block — log the exception or remove the try/except"
-                    )
+        if not isinstance(node, ast.Try):
+            continue
+        for handler in node.handlers:
+            _check_empty_except(file, handler, validator)
 
-    # 3. Magic string literals (duplicate non-trivial strings)
-    string_counts: dict[str, list[int]] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            s = node.value
-            if len(s) >= 3 and s.lower() not in MAGIC_STRING_ALLOWLIST:
-                string_counts.setdefault(s, []).append(node.lineno)
-    for s, lines in string_counts.items():
-        if len(lines) >= 3:
-            validator.add(
-                file, lines[0], "SONAR",
-                f"Magic string '{s[:30]}...' duplicated {len(lines)} times — extract to constant"
-            )
+    # Magic strings
+    _check_magic_strings(file, tree, validator)
 
-    # 4. Nested control flow depth
+    # Nesting depth
     reported_nesting_lines: set[int] = set()
-
-    def _check_nesting(node: ast.AST, depth: int = 0) -> None:
-        if depth > MAX_NESTING_DEPTH:
-            line = getattr(node, "lineno", 0)
-            if line > 0 and line not in reported_nesting_lines:
-                reported_nesting_lines.add(line)
-                validator.add(
-                    file, line, "SONAR",
-                    f"Control flow nesting depth = {depth} (max {MAX_NESTING_DEPTH}) — extract helper or use early returns"
-                )
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.If, ast.For, ast.While, ast.With, ast.Try)):
-                _check_nesting(child, depth + 1)
-            elif isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
-                _check_nesting(child, depth=0)  # Reset at function boundary
-            else:
-                _check_nesting(child, depth)
-
     for top_level in ast.iter_child_nodes(tree):
-        _check_nesting(top_level, depth=0)
+        _check_nesting(file, top_level, 0, reported_nesting_lines, validator)
 
 
 # ───────────────────────────────
@@ -342,73 +479,141 @@ def check_sonar_quality(file: Path, source: str, validator: Validator) -> None:
 # ───────────────────────────────
 
 SECURITY_PATTERNS = [
-    (r"\beval\s*\(", "eval() is dangerous"),
-    (r"\bexec\s*\(", "exec() is dangerous"),
-    (r"\bpickle\.loads?\s*\(", "pickle on untrusted data is dangerous"),
-    (r"[\"']sk-[a-zA-Z0-9]{20,}[\"']", "Hardcoded OpenAI API key detected"),
-    (r"[\"']AKIA[0-9A-Z]{16}[\"']", "Hardcoded AWS access key detected"),
-    (r"password\s*=\s*[\"'][^\"']+[\"']", "Possible hardcoded password"),
-    (r"f\s*[\"']\s*SELECT\s+.*\{.*\}", "Potential SQL injection via f-string"),
+    (r'\bsk-[a-zA-Z0-9]{20,}\b', "Hardcoded OpenAI API key detected"),
+    (r'\bAKIA[0-9A-Z]{16}\b', "Hardcoded AWS access key detected"),
+    (r"password\s*=\s*['\"][^'\"]+['\"]", "Possible hardcoded password"),
+    (r"f\s*['\"]\s*SELECT\s+.*\{.*\}", "Potential SQL injection via f-string"),
 ]
 
 
-def check_security(file: Path, source: str, validator: Validator) -> None:
+def _is_dangerous_call(node: ast.Call, name: str) -> bool:
+    return isinstance(node.func, ast.Name) and node.func.id == name
+
+
+def _is_pickle_load(node: ast.Call) -> bool:
+    if not isinstance(node.func, ast.Attribute):
+        return False
+    if node.func.attr not in ("load", "loads"):
+        return False
+    return isinstance(node.func.value, ast.Name) and node.func.value.id == "pickle"
+
+
+def _check_ast_security(file: Path, tree: ast.AST, validator: Validator) -> None:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if _is_dangerous_call(node, "eval"):
+            validator.add(file, node.lineno, RULE_SECURITY, "eval() is dangerous")
+            continue
+        if _is_dangerous_call(node, "exec"):
+            validator.add(file, node.lineno, RULE_SECURITY, "exec() is dangerous")
+            continue
+        if _is_pickle_load(node):
+            validator.add(
+                file, node.lineno, RULE_SECURITY, "pickle on untrusted data is dangerous"
+            )
+
+
+def _check_regex_security(file: Path, source: str, validator: Validator) -> None:
     lines = source.splitlines()
     for i, line in enumerate(lines, start=1):
+        if "# noqa" in line:
+            continue
         for pattern, reason in SECURITY_PATTERNS:
-            if re.search(pattern, line, re.IGNORECASE) and "# noqa" not in line:
-                validator.add(file, i, "SECURITY", reason)
+            if re.search(pattern, line, re.IGNORECASE):
+                validator.add(file, i, RULE_SECURITY, reason)
+
+
+def check_security(file: Path, source: str, validator: Validator) -> None:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        tree = None
+
+    if tree is not None:
+        _check_ast_security(file, tree, validator)
+    _check_regex_security(file, source, validator)
 
 
 # ───────────────────────────────
 # Rule 8: API Response Envelope
 # ───────────────────────────────
 
+
+def _check_router_decorator(decorator: ast.expr) -> bool:
+    if not isinstance(decorator, ast.Call):
+        return False
+    if isinstance(decorator.func, ast.Attribute) and decorator.func.attr == "get":
+        return True
+    return isinstance(decorator.func, ast.Name) and decorator.func.id == "router"
+
+
+def _has_response_model(decorator: ast.expr) -> bool:
+    if not isinstance(decorator, ast.Call):
+        return False
+    return any(
+        isinstance(kw, ast.keyword) and kw.arg == "response_model" for kw in decorator.keywords
+    )
+
+
 def check_api_envelope(file: Path, source: str, validator: Validator) -> None:
-    if file.name != "router.py":
+    if file.name != ROUTER_FILE:
         return
 
     tree = ast.parse(source)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            for decorator in node.decorator_list:
-                if isinstance(decorator, ast.Call):
-                    if isinstance(decorator.func, ast.Attribute) and decorator.func.attr == "get":
-                        pass
-                    if isinstance(decorator.func, ast.Name) and decorator.func.id == "router":
-                        pass
+    has_router_decorator = False
+    has_response_model_kw = False
 
-    # Check for response_model presence
-    if "response_model" not in source:
-        validator.add(file, 1, "API", "Router file missing response_model declarations")
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        for decorator in node.decorator_list:
+            if _check_router_decorator(decorator):
+                has_router_decorator = True
+            if _has_response_model(decorator):
+                has_response_model_kw = True
+
+    if has_router_decorator and not has_response_model_kw:
+        validator.add(
+            file, 1, RULE_API, "Router file missing response_model declarations"
+        )
 
 
 # ───────────────────────────────
 # Rule 9: Secrets in .env check
 # ───────────────────────────────
 
+
 def check_env_committed(validator: Validator) -> None:
-    gitignore = PROJECT_ROOT / ".gitignore"
+    gitignore = PROJECT_ROOT / GITIGNORE
     if not gitignore.exists():
-        validator.add(Path(".gitignore"), 0, "SECRETS", ".gitignore missing")
+        validator.add(Path(GITIGNORE), 0, RULE_SECRETS, ".gitignore missing")
         return
 
     content = gitignore.read_text()
-    if ".env" not in content:
-        validator.add(gitignore, 0, "SECRETS", ".gitignore must ignore .env files")
+    if ENV_FILE not in content:
+        validator.add(gitignore, 0, RULE_SECRETS, ".gitignore must ignore .env files")
 
-    env_file = PROJECT_ROOT / ".env"
-    if env_file.exists():
-        # Check if it's tracked
-        try:
-            result = subprocess.run(
-                ["git", "ls-files", ".env"],
-                capture_output=True, text=True, cwd=PROJECT_ROOT
-            )
-            if result.stdout.strip():
-                validator.add(env_file, 0, "SECRETS", ".env file is tracked by git!")
-        except FileNotFoundError:
-            pass
+    env_file = PROJECT_ROOT / ENV_FILE
+    if not env_file.exists():
+        return
+
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", ENV_FILE],
+            capture_output=True,
+            text=True,
+            cwd=PROJECT_ROOT,
+        )
+        if result.stdout.strip():
+            validator.add(env_file, 0, RULE_SECRETS, ".env file is tracked by git!")
+    except FileNotFoundError:
+        logger.warning("git command not found; skipping .env tracking check")
+
+
+# ───────────────────────────────
+# File dispatcher
+# ───────────────────────────────
 
 
 def validate_file(file: Path, validator: Validator) -> None:
@@ -430,7 +635,9 @@ def validate_file(file: Path, validator: Validator) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Architectural validation engine")
     parser.add_argument("--strict", action="store_true", help="Fail on any violation")
-    parser.add_argument("--path", type=Path, default=BACKEND_SRC, help="Path to scan")
+    parser.add_argument(
+        "--path", type=Path, default=BACKEND_SRC, help="Path to scan"
+    )
     args = parser.parse_args(argv)
 
     validator = Validator()

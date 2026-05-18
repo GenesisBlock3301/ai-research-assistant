@@ -80,6 +80,12 @@ frontend/src/
 
 ---
 
+## Vertical Development
+
+**Frontend code is only half the task.** If you build a UI feature that consumes a new or changed API, the corresponding backend endpoint MUST also be completed before the task is declared done. See root `AGENTS.md` → "Vertical Development Rule".
+
+---
+
 ## Operational Checklist
 
 Before declaring any frontend task complete:

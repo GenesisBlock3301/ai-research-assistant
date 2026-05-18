@@ -8,10 +8,10 @@
 
 ## What Kimi Actually Supports (Native)
 
-| Feature | Location | How it works |
-|---------|----------|--------------|
-| **Skills** | `.agents/skills/` | Auto-discovered and loaded when task matches `description` |
-| **AGENTS.md** | Root + subdirectories | Read at session start |
+| Feature       | Location              | How it works                                               |
+|---------------|-----------------------|------------------------------------------------------------|
+| **Skills**    | `.agents/skills/`     | Auto-discovered and loaded when task matches `description` |
+| **AGENTS.md** | Root + subdirectories | Read at session start                                      |
 
 **That's it.** Kimi does NOT support:
 - ❌ Path-scoped rules (like Claude's `.claude/rules/`)
@@ -103,6 +103,22 @@ Located in `.agents/skills/`. Kimi reads the YAML `description` field and loads 
 - `react-vite-frontend/references/component-patterns.md` — compound components, variants
 - `rag-pipeline/references/chunking-strategies.md` — semantic + structural chunking
 - `rag-pipeline/references/hybrid-search.md` — BM25 + vector + RRF math
+
+---
+
+## Vertical Development Rule (Full-Stack Slices)
+
+**Kimi MUST implement every feature as a complete vertical slice spanning both backend and frontend.**
+
+- If a backend API endpoint is created or modified, the corresponding frontend integration (hook, component, route, store update) MUST also be completed in the same task.
+- If a frontend feature needs new data, the corresponding backend endpoint MUST also be implemented in the same task.
+- **Exception:** Database schema design and migrations are already established and are exempt from this rule.
+
+**Example:** If implementing login:
+- Backend: `POST /api/auth/login` endpoint + service + tests
+- Frontend: Login page + form validation + API hook + route + auth store update
+
+**A feature task is NOT complete until both backend and frontend pass their respective quality gates.**
 
 ---
 

@@ -104,6 +104,12 @@ src/<domain>/
 
 ---
 
+## Vertical Development
+
+**Backend code is only half the task.** If you create or modify an API endpoint, the corresponding frontend integration MUST also be completed before the task is declared done. See root `AGENTS.md` → "Vertical Development Rule".
+
+---
+
 ## Operational Checklist
 
 Before declaring any backend task complete:
